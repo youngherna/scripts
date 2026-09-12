@@ -28,6 +28,7 @@ UBUNTU_24_26_PACKAGES="python-is-python3 python3-pyelftools curl"
 DEBIAN_10_PACKAGES="libncurses5"
 DEBIAN_11_PACKAGES="libncurses5"
 PACKAGES=""
+JDK_PACKAGE="openjdk-21-jdk"
 
 run "Install software-properties-common" sudo apt install software-properties-common -y
 
@@ -44,11 +45,16 @@ if [[ ${LSB_RELEASE} =~ "Ubuntu 24" || ${LSB_RELEASE} =~ "Ubuntu 26" ]]; then
     PACKAGES="${UBUNTU_24_26_PACKAGES}"
 elif [[ ${LSB_RELEASE} =~ "Ubuntu 20" || ${LSB_RELEASE} =~ "Ubuntu 21" || ${LSB_RELEASE} =~ "Ubuntu 22" || ${LSB_RELEASE} =~ 'Pop!_OS 2' ]]; then
     PACKAGES="${UBUNTU_20_PACKAGES}"
+    JDK_PACKAGE="openjdk-17-jdk"
 elif [[ ${LSB_RELEASE} =~ "Debian GNU/Linux 10" ]]; then
     PACKAGES="${DEBIAN_10_PACKAGES}"
+    JDK_PACKAGE="openjdk-17-jdk"
 elif [[ ${LSB_RELEASE} =~ "Debian GNU/Linux 11" ]]; then
     PACKAGES="${DEBIAN_11_PACKAGES}"
+    JDK_PACKAGE="openjdk-17-jdk"
 fi
+
+echo "JDK seleccionado: ${JDK_PACKAGE}"
 
 # Added libxml2-dev alongside libxml2-utils to replace the deprecated libxml2 package
 run "Install build dependencies" sudo DEBIAN_FRONTEND=noninteractive \
@@ -63,7 +69,7 @@ run "Install build dependencies" sudo DEBIAN_FRONTEND=noninteractive \
     pngquant python3 python3-pyelftools re2c schedtool squashfs-tools subversion \
     texinfo unzip xsltproc zip zlib1g-dev lzip \
     libxml-simple-perl libswitch-perl apt-utils rsync \
-    openjdk-21-jdk \
+    ${JDK_PACKAGE} \
     libelf-dev \
     ${PACKAGES} -y
 
@@ -109,16 +115,24 @@ else
 fi
 
 # make version check
-if [[ "$(command -v make)" ]]; then
+echo -e "\n>>> Checking make version"
+install_make=1
+if command -v make >/dev/null 2>&1; then
     makeversion="$(make -v | head -1 | awk '{print $3}')"
-    if [[ ${makeversion} != "${LATEST_MAKE_VERSION}" ]]; then
-        echo "Installing make ${LATEST_MAKE_VERSION} instead of ${makeversion}"
-        if ! bash "$(dirname "$0")"/make.sh "${LATEST_MAKE_VERSION}"; then
-            ERRORS+=("FAILED: make ${LATEST_MAKE_VERSION} installation")
-            echo "ERROR: make installation failed!"
-        fi
-    else
+    if [[ "${makeversion}" == "${LATEST_MAKE_VERSION}" ]]; then
         echo "OK: make ${makeversion} already up to date"
+        install_make=0
+    else
+        echo "Installing make ${LATEST_MAKE_VERSION} instead of ${makeversion}"
+    fi
+else
+    echo "Installing make ${LATEST_MAKE_VERSION} (no instalado)"
+fi
+
+if [[ ${install_make} -eq 1 ]]; then
+    if ! bash "$(dirname "${BASH_SOURCE[0]}")"/make.sh "${LATEST_MAKE_VERSION}"; then
+        ERRORS+=("FAILED: make ${LATEST_MAKE_VERSION} installation")
+        echo "ERROR: make installation failed!"
     fi
 fi
 
@@ -135,16 +149,25 @@ fi
 
 # Legacy ncurses libraries
 echo -e "\n>>> Installing legacy ncurses libraries (libtinfo5, libncurses5, libncurses6)"
-if sudo apt install -y libncurses6 && \
-   wget -q http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2_amd64.deb && \
-   wget -q http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libncurses5_6.3-2_amd64.deb && \
-   sudo dpkg -i libtinfo5_6.3-2_amd64.deb libncurses5_6.3-2_amd64.deb; then
-    echo "OK: Legacy ncurses libraries installed"
+if [[ ${LSB_RELEASE} =~ "Ubuntu 20" ]]; then
+    if sudo apt install -y libncurses5 libtinfo5 libncurses6; then
+        echo "OK: Legacy ncurses libraries installed (repos nativos de focal)"
+    else
+        ERRORS+=("FAILED: Legacy ncurses libraries")
+        echo "ERROR: Legacy ncurses installation failed!"
+    fi
 else
-    ERRORS+=("FAILED: Legacy ncurses libraries")
-    echo "ERROR: Legacy ncurses installation failed!"
+    if sudo apt install -y libncurses6 && \
+       wget -q http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2_amd64.deb && \
+       wget -q http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libncurses5_6.3-2_amd64.deb && \
+       sudo dpkg -i libtinfo5_6.3-2_amd64.deb libncurses5_6.3-2_amd64.deb; then
+        echo "OK: Legacy ncurses libraries installed"
+    else
+        ERRORS+=("FAILED: Legacy ncurses libraries")
+        echo "ERROR: Legacy ncurses installation failed!"
+    fi
+    rm -f libtinfo5_6.3-2_amd64.deb libncurses5_6.3-2_amd64.deb
 fi
-rm -f libtinfo5_6.3-2_amd64.deb libncurses5_6.3-2_amd64.deb
 
 # Final summary
 echo -e "\n==============================="
@@ -157,6 +180,7 @@ else
     done
     echo ""
     echo "Please fix the above errors before building!"
+    echo "==============================="
     exit 1
 fi
 echo "==============================="
